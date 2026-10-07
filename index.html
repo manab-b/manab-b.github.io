@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YouTubeパイプライン 状況ダッシュボード</title>
+<style>
+  :root{
+    --bg:#0f1115; --card:#1a1d24; --card2:#22262f; --text:#e8eaf0;
+    --muted:#9aa1ad; --ok:#3fb96b; --warn:#e6b93f; --err:#e05c5c;
+    --blue:#5b9bd5; --purple:#9b7bd5; --line:#2c313c;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-family:"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;padding:20px;max-width:1100px;margin:0 auto;}
+  header{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;flex-wrap:wrap;gap:8px;}
+  h1{font-size:20px;font-weight:700;}
+  .updated{color:var(--muted);font-size:12px;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;}
+  .card h2{font-size:13px;color:var(--muted);font-weight:600;margin-bottom:12px;letter-spacing:.05em;text-transform:uppercase;}
+  .lamp{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:600;}
+  .dot{width:14px;height:14px;border-radius:50%;flex-shrink:0;}
+  .dot.ok{background:var(--ok);box-shadow:0 0 10px var(--ok);}
+  .dot.warn{background:var(--warn);box-shadow:0 0 10px var(--warn);animation:blink 1.2s infinite;}
+  .dot.err{background:var(--err);box-shadow:0 0 10px var(--err);}
+  .dot.idle{background:var(--muted);}
+  @keyframes blink{50%{opacity:.4;}}
+  .sub{color:var(--muted);font-size:12px;margin-top:6px;}
+  .statrow{display:flex;gap:10px;flex-wrap:wrap;}
+  .stat{flex:1;min-width:70px;background:var(--card2);border-radius:10px;padding:10px;text-align:center;}
+  .stat .num{font-size:24px;font-weight:700;}
+  .stat .lbl{font-size:11px;color:var(--muted);margin-top:4px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{padding:8px 6px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top;}
+  th{color:var(--muted);font-weight:600;font-size:11px;}
+  a{color:var(--blue);text-decoration:none;}
+  a:hover{text-decoration:underline;}
+  .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap;}
+  .b-wait{background:rgba(230,185,63,.15);color:var(--warn);}
+  .b-done{background:rgba(63,185,107,.15);color:var(--ok);}
+  .b-prog{background:rgba(91,155,213,.15);color:var(--blue);}
+  .b-back{background:rgba(155,123,213,.15);color:var(--purple);}
+  .b-skip{background:rgba(154,161,173,.15);color:var(--muted);}
+  .queue-item{background:var(--card2);border-radius:10px;padding:12px;margin-bottom:10px;}
+  .queue-item .t{font-weight:600;font-size:14px;margin-bottom:6px;}
+  .queue-card{border-color:var(--warn);}
+  .score{font-weight:700;color:var(--warn);}
+  .err{color:var(--err);font-size:12px;}
+  .empty{color:var(--muted);font-size:13px;padding:8px 0;}
+  .links{margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;}
+  .links a{background:var(--card2);border:1px solid var(--line);padding:8px 14px;border-radius:8px;font-size:13px;}
+  #err-banner{display:none;background:rgba(224,92,92,.12);border:1px solid var(--err);color:var(--err);border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📺 YouTubeパイプライン 状況ダッシュボード</h1>
+  <span class="updated" id="updated">読み込み中…</span>
+</header>
+
+<div id="err-banner"></div>
+
+<div class="grid">
+
+  <!-- 1. パイプライン状態 -->
+  <div class="card">
+    <h2>パイプライン状態</h2>
+    <div class="lamp"><span class="dot idle" id="lamp"></span><span id="lamp-text">確認中</span></div>
+    <div class="sub" id="lamp-sub"></div>
+    <div class="sub" id="lamp-err"></div>
+  </div>
+
+  <!-- 2. ステータス内訳 -->
+  <div class="card">
+    <h2>ネタステータス内訳</h2>
+    <div class="statrow" id="stats"></div>
+  </div>
+
+  <!-- 3. 公開待ちキュー -->
+  <div class="card queue-card" id="queue-card" style="grid-column:1/-1;">
+    <h2>公開待ちキュー（承認作業はここだけ）</h2>
+    <div id="queue"></div>
+  </div>
+
+  <!-- 4. リーダーボード -->
+  <div class="card">
+    <h2>動画化候補 リーダーボード</h2>
+    <div id="board"></div>
+  </div>
+
+  <!-- 5. 週次実績 -->
+  <div class="card">
+    <h2>週次実績（手動転記）</h2>
+    <div id="weekly"></div>
+  </div>
+
+  <!-- 6. エラーログ -->
+  <div class="card">
+    <h2>エラーログ（直近5件）</h2>
+    <div id="logs"></div>
+  </div>
+
+</div>
+
+<div class="links">
+  <a href="#" id="lnk-sheet" target="_blank">ネタ表（Sheets）</a>
+  <a href="https://studio.youtube.com" target="_blank">YouTube Studio</a>
+  <a href="#" id="lnk-n8n" target="_blank">n8n 管理画面</a>
+</div>
+
+<script>
+/* ================== 設定（ここだけ書き換える） ================== */
+const SHEET_ID = "ここにGoogle SheetsのIDを貼る";   // スプレッドシートURLの /d/ と /edit の間の文字列
+const SHEET_NETA    = "ネタ表";      // タブ1
+const SHEET_STATUS  = "ダッシュボード"; // タブ4（パイプライン状態）
+const SHEET_WEEKLY  = "週次実績";
+const SHEET_LOG     = "ログ";
+const N8N_URL = "http://localhost:5678";  // n8n管理画面
+const REFRESH_MIN = 5;                       // 自動更新間隔（分）
+/* ================================================================ */
+
+const GSHEET_URL = "https://docs.google.com/spreadsheets/d/" + SHEET_ID;
+document.getElementById("lnk-sheet").href = GSHEET_URL;
+document.getElementById("lnk-n8n").href = N8N_URL;
+
+const osheet = name =>
+  fetch("https://opensheet.elt.co/" + SHEET_ID + "/" + encodeURIComponent(name))
+    .then(r => { if(!r.ok) throw new Error(name + " の読み込み失敗"); return r.json(); });
+
+function fmtDate(s){
+  if(!s) return "";
+  const d = new Date(s);
+  return isNaN(d) ? s : d.toLocaleString("ja-JP",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"});
+}
+
+function esc(s){ return (s??"").toString().replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+async function load(){
+  const banner = document.getElementById("err-banner");
+  banner.style.display = "none";
+  try{
+    const [neta, status, weekly, logs] = await Promise.all([
+      osheet(SHEET_NETA), osheet(SHEET_STATUS), osheet(SHEET_WEEKLY), osheet(SHEET_LOG)
+    ]);
+
+    /* --- タブ4: パイプライン状態 --- */
+    const kv = {};
+    (status||[]).forEach(r => kv[r["項目"] ?? r[Object.keys(r)[0]]] = r["値"] ?? r[Object.keys(r)[1]]);
+    const result = kv["最終実行成否"] || "";
+    const lamp = document.getElementById("lamp"), lt = document.getElementById("lamp-text");
+    const sub = document.getElementById("lamp-sub"), lerr = document.getElementById("lamp-err");
+    lerr.textContent = "";
+    if(result === "成功"){ lamp.className="dot ok"; lt.textContent="最終実行：成功"; }
+    else if(result === "エラー"){ lamp.className="dot err"; lt.textContent="最終実行：エラー";
+      lerr.textContent = kv["エラーメッセージ"] || ""; lerr.className="err"; }
+    else if(result === "実行中"){ lamp.className="dot warn"; lt.textContent="実行中"; }
+    else { lamp.className="dot idle"; lt.textContent="まだ実行されていません"; }
+    sub.textContent = kv["最終実行日時"] ? "最終実行: " + fmtDate(kv["最終実行日時"]) : "";
+
+    /* --- タブ1: ステータス集計 --- */
+    const counts = {};
+    (neta||[]).forEach(r => { const s = r["ステータス"]; if(s) counts[s]=(counts[s]||0)+1; });
+    const order = [["未制作","#9aa1ad"],["台本完成","#5b9bd5"],["素材準備中","#9b7bd5"],["公開待ち","#e6b93f"],["公開済","#3fb96b"]];
+    document.getElementById("stats").innerHTML = order.map(([k,c]) =>
+      `<div class="stat"><div class="num" style="color:${c}">${counts[k]||0}</div><div class="lbl">${k}</div></div>`).join("");
+
+    /* --- 公開待ちキュー --- */
+    const badge = s => s==="公開待ち" ? '<span class="badge b-wait">公開待ち</span>'
+      : s==="台本完成" ? '<span class="badge b-prog">台本完成</span>'
+      : s==="素材準備中" ? '<span class="badge b-back">素材準備中</span>'
+      : s==="未制作" ? '<span class="badge b-skip">未制作</span>' : esc(s);
+    const waiting = (neta||[]).filter(r => r["ステータス"]==="公開待ち");
+    const prog    = (neta||[]).filter(r => ["台本完成","素材準備中"].includes(r["ステータス"]));
+    let qh = "";
+    waiting.forEach(r => {
+      const url = r["YouTube URL"] || "#";
+      qh += `<div class="queue-item"><div class="t">▶ ${esc(r["ネタタイトル"]||"(無題)")}</div>
+        ${badge(r["ステータス"])} ${url!=="#" ? `<a href="${esc(url)}" target="_blank">下書きを確認して公開 →</a>` : '<span class="sub">URL未登録</span>'}</div>`;
+    });
+    prog.forEach(r => {
+      qh += `<div class="queue-item"><div class="t" style="color:var(--muted)">⏳ ${esc(r["ネタタイトル"]||"(無題)")}</div>${badge(r["ステータス"])}</div>`;
+    });
+    document.getElementById("queue").innerHTML = qh || '<div class="empty">公開待ちはありません。パイプラインは待機中です。</div>';
+    document.getElementById("queue-card").style.opacity = waiting.length ? 1 : .65;
+
+    /* --- リーダーボード --- */
+    const cand = (neta||[]).filter(r => (r["判定"]==="動画化"||r["判定"]==="候補") && r["ステータス"]!=="公開済" && r["ステータス"]!=="見送り")
+      .sort((a,b)=>(parseInt(b["合計"])||0)-(parseInt(a["合計"])||0)).slice(0,8);
+    document.getElementById("board").innerHTML = cand.length
+      ? "<table><tr><th>スコア</th><th>ネタ</th><th>判定</th></tr>" + cand.map(r =>
+        `<tr><td class="score">${esc(r["合計"]||"-")}</td><td>${esc(r["ネタタイトル"]||"")}</td><td>${esc(r["判定"]||"")}</td></tr>`).join("") + "</table>"
+      : '<div class="empty">候補がありません。Kimiの週次タスクに採点を依頼してください。</div>';
+
+    /* --- 週次実績 --- */
+    document.getElementById("weekly").innerHTML = (weekly||[]).length
+      ? "<table><tr>" + Object.keys(weekly[0]).map(k=>`<th>${esc(k)}</th>`).join("") + "</tr>" +
+        weekly.slice(-8).reverse().map(r=>"<tr>"+Object.keys(weekly[0]).map(k=>`<td>${esc(r[k])}</td>`).join("")+"</tr>").join("") + "</table>"
+      : '<div class="empty">週次実績シートに数字を転記するとここに表示されます。</div>';
+
+    /* --- エラーログ --- */
+    document.getElementById("logs").innerHTML = (logs||[]).length
+      ? "<table>" + logs.slice(-5).reverse().map(r => {
+          const vals = Object.values(r);
+          return `<tr><td style="white-space:nowrap;color:var(--muted)">${esc(fmtDate(vals[0]))}</td>
+                  <td class="${vals[1]==="ERROR"?"err":""}">${esc(vals.slice(1).join(" / "))}</td></tr>`;
+        }).join("") + "</table>"
+      : '<div class="empty">エラーログはありません。</div>';
+
+    document.getElementById("updated").textContent = "更新: " + new Date().toLocaleString("ja-JP");
+  }catch(e){
+    banner.style.display = "block";
+    banner.textContent = "データの読み込みに失敗しました: " + e.message +
+      " ／ Sheetsの共有設定「リンクを知っている全員が閲覧可」になっているか確認してください。";
+    document.getElementById("updated").textContent = "読み込み失敗";
+  }
+}
+
+load();
+setInterval(load, REFRESH_MIN * 60000);
+</script>
+</body>
+</html>
